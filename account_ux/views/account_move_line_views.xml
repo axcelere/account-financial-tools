@@ -73,9 +73,6 @@
             <field name="credit" position="after">
                 <field name="balance" sum="Balance" readonly="1" optional="hide"/>
             </field>
-            <field name="full_reconcile_id" position="attributes">
-                <attribute name="optional">hide</attribute>
-            </field>
         </field>
     </record>
 
@@ -133,22 +130,20 @@
                     <tree create="0">
                         <field name="credit_move_id"/>
                         <field name="amount" sum="Total"/>
-                        <field name="amount_currency" sum="Total"/>
+                        <field name="credit_amount_currency" sum="Total"/>
                         <field name="company_currency_id" invisible="1"/>
-                        <field name="currency_id" invisible="1"/>
+                        <field name="credit_currency_id" invisible="1"/>
                     </tree>
                 </field>
                 <field name="matched_debit_ids" readonly="1" >
                     <tree create="0">
                         <field name="debit_move_id"/>
                         <field name="amount" sum="Total"/>
-                        <field name="amount_currency" sum="Total"/>
-                        <field name="company_currency_id" invisible="1"/>
-                        <field name="currency_id" invisible="1"/>
+                        <field name="debit_currency_id" invisible="1"/>
+                        <field name="debit_amount_currency" sum="Total"/>
                     </tree>
                 </field>
             </label>
         </field>
     </record>
-
 </odoo>
