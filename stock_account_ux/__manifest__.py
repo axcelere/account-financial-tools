@@ -18,25 +18,27 @@
 #
 ##############################################################################
 {
-    'name': 'Surcharges on payment terms',
+    'name': 'Stock Account UX',
     'version': "17.0.1.0.0",
     'category': 'Accounting',
     'sequence': 14,
-    'summary': 'Allow to add surcharges for invoices on payment terms',
+    'summary': '',
     'author': 'ADHOC SA',
     'website': 'www.adhoc.com.ar',
     'license': 'AGPL-3',
+    'images': [
+    ],
     'depends': [
         'account',
-        'account_debit_note',
+        "stock_account",
     ],
-    'data': [
-        'views/account_payment_term_view.xml',
-        'views/account_payment_term_surcharge_view.xml',
-        'wizard/res_config_settings_views.xml',
-        'security/ir.model.access.csv',
-        'data/ir_cron_data.xml'
+    'data':[
+        'views/account_move_views.xml',
+    ],
+    'demo': [
     ],
     'installable': True,
+    'auto_install': False,
     'application': False,
+    'post_load': 'monkey_patches',
 }

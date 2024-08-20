@@ -5,6 +5,7 @@
 from odoo import models, fields, api, _
 from odoo.tools.safe_eval import safe_eval
 from dateutil.relativedelta import relativedelta
+from odoo.exceptions import UserError
 import logging
 _logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class ResCompanyInterest(models.Model):
         'Interest Product',
         required=True,
     )
-    analytic_line_ids = fields.Many2one(
+    analytic_account_id = fields.Many2one(
         'account.analytic.account',
         'Analytic account',
     )
@@ -82,7 +83,22 @@ class ResCompanyInterest(models.Model):
     def _cron_recurring_interests_invoices(self):
         _logger.info('Running Interest Invoices Cron Job')
         current_date = fields.Date.today()
-        self.search([('next_date', '<=', current_date)]).create_interest_invoices()
+        companies_with_errors = []
+
+        for rec in self.search([('next_date', '<=', current_date)]):
+            try:
+                rec.create_interest_invoices()
+                rec.env.cr.commit()
+            except:
+                _logger.error('Error creating interest invoices for company: %s', rec.company_id.name)
+                companies_with_errors.append(rec.company_id.name)
+                rec.env.cr.rollback()
+                
+        if companies_with_errors:
+            company_names = ', '.join(companies_with_errors)
+            error_message = _("We couldn't run interest invoices cron job in the following companies: %s.") % company_names
+            raise UserError(error_message)
+
 
     def create_interest_invoices(self):
         for rec in self:
@@ -135,7 +151,7 @@ class ResCompanyInterest(models.Model):
         ]
         return move_line_domain
 
-    def create_invoices(self, to_date, groupby='partner_id'):
+    def create_invoices(self, to_date, groupby=['partner_id']):
         self.ensure_one()
 
         journal = self.env['account.journal'].search([
@@ -143,22 +159,18 @@ class ResCompanyInterest(models.Model):
             ('company_id', '=', self.company_id.id)], limit=1)
 
         move_line_domain = self._get_move_line_domains(to_date)
-
         # Check if a filter is set
         if self.domain:
             move_line_domain += safe_eval(self.domain)
 
-        fields = ['id', 'amount_residual', 'partner_id', 'account_id']
-        if groupby not in fields:
-            fields += [groupby]
+        fields = ['id:recordset', 'amount_residual:sum', 'partner_id:recordset', 'account_id:recordset']
 
         move_line = self.env['account.move.line']
-        grouped_lines = move_line.read_group(
+        grouped_lines = move_line._read_group(
             domain=move_line_domain,
-            fields=fields,
-            groupby=[groupby],
+            groupby=groupby,
+            aggregates=fields,
         )
-
         self = self.with_context(
             company_id=self.company_id.id,
             mail_notrack=True,
@@ -167,21 +179,13 @@ class ResCompanyInterest(models.Model):
         total_items = len(grouped_lines)
         _logger.info('%s interest invoices will be generated', total_items)
         for idx, line in enumerate(grouped_lines):
+            move_vals = self._prepare_interest_invoice(
+                line, to_date, journal)
 
-            debt = line['amount_residual']
-
-            if not debt or debt <= 0.0:
-                _logger.info("Debt is negative, skipping...")
+            if not move_vals:
                 continue
 
-            _logger.info(
-                'Creating Interest Invoice (%s of %s) with values:\n%s',
-                idx + 1, total_items, line)
-            partner_id = line[groupby][0]
-
-            partner = self.env['res.partner'].browse(partner_id)
-            move_vals = self._prepare_interest_invoice(
-                partner, debt, to_date, journal)
+            _logger.info('Creating Interest Invoice (%s of %s) with values:\n%s', idx + 1, total_items, line)
 
             move = self.env['account.move'].create(move_vals)
 
@@ -209,8 +213,16 @@ class ResCompanyInterest(models.Model):
 
         return res
 
-    def _prepare_interest_invoice(self, partner, debt, to_date, journal):
+    def _prepare_interest_invoice(self, line, to_date, journal):
         self.ensure_one()
+        debt = line[2]
+
+        if not debt or debt <= 0.0:
+            _logger.info("Debt is negative, skipping...")
+            return
+
+        partner_id = line[0].id
+        partner = self.env['res.partner'].browse(partner_id)
         comment = self.prepare_info(to_date, debt)
         fpos = partner.property_account_position_id
         taxes = self.interest_product_id.taxes_id.filtered(
@@ -232,7 +244,7 @@ class ResCompanyInterest(models.Model):
                 "price_unit": self.rate * debt,
                 "partner_id": partner.id,
                 "name": self.interest_product_id.name + '.\n' + comment,
-                "analytic_line_ids": self.analytic_line_ids.id,
+                "analytic_distribution": {self.analytic_account_id.id: 100.0} if self.analytic_account_id.id else False,
                 "tax_ids": [(6, 0, tax_id.ids)]
             })],
         }

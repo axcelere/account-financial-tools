@@ -51,9 +51,11 @@ class AccountMove(models.Model):
     def action_send_invoice_mail(self):
         for rec in self.filtered(lambda x: x.is_invoice(include_receipts=True) and x.journal_id.mail_template_id):
             try:
-                rec.message_post_with_template(
-                    rec.journal_id.mail_template_id.id,
+                rec.message_post_with_source(
+                    rec.journal_id.mail_template_id,
+                    subtype_xmlid='mail.mt_comment'
                 )
+                rec.is_move_sent= True
             except Exception as error:
                 title = _(
                     "ERROR: Invoice was not sent via email"
@@ -73,7 +75,7 @@ class AccountMove(models.Model):
                     _("Please check the email template associated with"
                       " the invoice journal."),
                     "<code>" + str(error) + "</code>"
-                ]),
+                ]), body_is_html=True
                 )
 
     @api.onchange('partner_id')
@@ -86,39 +88,54 @@ class AccountMove(models.Model):
         res._onchange_partner_commercial()
         return res
 
-    def _compute_payments_widget_to_reconcile_info(self):
-        """
-        Modificamos el widget para que si la compañía tiene el setting de forzar concilacion en moneda y estamos
-        en esa situacion (cuenta deudora no tiene moneda). Entonces el importe que previsualizamos para conciliar
-        respeta la modificacion que hacemos al conciliar (basicamente que importa el rate en pesos por lo cual tomamos
-        el rate de la factura)
-        """
-        super()._compute_payments_widget_to_reconcile_info()
-
+    # Sobrescribe el método de odoo en el PR https://github.com/odoo/odoo/pull/170066/files
+    def get_amount_diff_foreign_currencies(self, line, move):
         def get_accounting_rate(company_currency, amount, amount_currency, currency):
             if company_currency.is_zero(amount) or currency.is_zero(amount_currency):
                 return 0.0
             else:
                 return abs(amount_currency) / abs(amount)
 
-        # TODO tal vez chequear tmb que moneda de factura sea distinta? o eso no influye? habria que ver caso de pagar con usd factura en ars
-        for move in self.filtered(
-                lambda x: x.invoice_outstanding_credits_debits_widget and \
-                x.company_id.currency_id != x.currency_id and x.company_id.reconcile_on_company_currency):
-            pay_term_lines = move.line_ids\
-                .filtered(lambda line: line.account_id.account_type in ('asset_receivable', 'liability_payable'))
-            # deberia ser solo una cuenta, pero como super hace un in chequeamos que cualquier cuenta pueda tener moneda
-            if any(x.currency_id for x in pay_term_lines.account_id):
-                continue
-            # para todos los asientos que son en moneda secundaria y que no tengan moneda calculamos el rate
-            # segun lo contable y previsualizamos la imputacion con este rate
+        rate = get_accounting_rate(move.company_id.currency_id, move.amount_total_signed, move.amount_total_in_currency_signed, move.currency_id)
+        amount = abs(line.amount_residual) * rate 
+        return amount
 
-            # los rates en realidad existen en los aml de la factura, pero para no tomar arbitrariamente uno sacamos
-            # el rate desde los totales de la factura
-            rate = get_accounting_rate(move.company_id.currency_id, move.amount_total_signed, move.amount_total_in_currency_signed, move.currency_id)
-            for item in move.invoice_outstanding_credits_debits_widget['content']:
-                amount_residual = self.env['account.move.line'].browse(item['id']).amount_residual
-                item['amount'] = move.currency_id.round(amount_residual * rate)
+    ### Comentamos este método debido a que el campo invoice_outstanding_credits_debits_widget no se estaba seteando correctamente en super
+    ### Como FIX agregamos este PR a Odoo: https://github.com/odoo/odoo/pull/170066/files
+
+    # def _compute_payments_widget_to_reconcile_info(self):
+    #     """
+    #     Modificamos el widget para que si la compañía tiene el setting de forzar concilacion en moneda y estamos
+    #     en esa situacion (cuenta deudora no tiene moneda). Entonces el importe que previsualizamos para conciliar
+    #     respeta la modificacion que hacemos al conciliar (basicamente que importa el rate en pesos por lo cual tomamos
+    #     el rate de la factura)
+    #     """
+    #     super()._compute_payments_widget_to_reconcile_info()
+
+    #     def get_accounting_rate(company_currency, amount, amount_currency, currency):
+    #         if company_currency.is_zero(amount) or currency.is_zero(amount_currency):
+    #             return 0.0
+    #         else:
+    #             return abs(amount_currency) / abs(amount)
+
+    #     # TODO tal vez chequear tmb que moneda de factura sea distinta? o eso no influye? habria que ver caso de pagar con usd factura en ars
+    #     for move in self.filtered(
+    #             lambda x: x.invoice_has_outstanding and \
+    #             x.company_id.currency_id != x.currency_id and x.company_id.reconcile_on_company_currency):
+    #         pay_term_lines = move.line_ids\
+    #             .filtered(lambda line: line.account_id.account_type in ('asset_receivable', 'liability_payable'))
+    #         # deberia ser solo una cuenta, pero como super hace un in chequeamos que cualquier cuenta pueda tener moneda
+    #         if any(x.currency_id for x in pay_term_lines.account_id):
+    #             continue
+    #         # para todos los asientos que son en moneda secundaria y que no tengan moneda calculamos el rate
+    #         # segun lo contable y previsualizamos la imputacion con este rate
+
+    #         # los rates en realidad existen en los aml de la factura, pero para no tomar arbitrariamente uno sacamos
+    #         # el rate desde los totales de la factura
+    #         rate = get_accounting_rate(move.company_id.currency_id, move.amount_total_signed, move.amount_total_in_currency_signed, move.currency_id)
+    #         for item in move.invoice_outstanding_credits_debits_widget['content']:
+    #             amount_residual = self.env['account.move.line'].browse(item['id']).amount_residual
+    #             item['amount'] = move.currency_id.round(amount_residual * rate)
 
     @api.depends('invoice_date')
     def _compute_invoice_date_due(self):
@@ -129,16 +146,6 @@ class AccountMove(models.Model):
             if inv.invoice_date:
                 inv.invoice_date_due = inv.invoice_date
         return super(AccountMove, invoices)._compute_invoice_date_due()
-
-    @api.constrains('state')
-    def _check_company_on_lines(self):
-        for move in self.filtered(lambda x: x.state == 'posted'):
-            lines_with_problem = s = move.line_ids.filtered(lambda x: x.account_id and x.account_id.company_id != move.company_id)
-            if lines_with_problem:
-                raise UserError(_(
-                    "There is at least one account in the journal entry of this move that belongs to a company that "
-                    "is different to the company of the move (id: %s)\n- %s" % (
-                        move.id, '\n- '.join(lines_with_problem.mapped('display_name')))))
 
     def _compute_currency_id(self):
         """ Si la factura tenía currency_id no queremos cambiarla si cambia el diario """
