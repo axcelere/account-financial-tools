@@ -14,6 +14,9 @@ def migrate(cr, version):
     action = env.ref('account_ux.action_account_change_currency', raise_if_not_found=False)
     if action:
         action.unlink()
+    view = env.ref("account_ux.view_account_change_no_exchange_currency", raise_if_not_found=False)
+    if view:
+        view.unlink()
     view = env.ref("account_ux.view_account_change_currency", raise_if_not_found=False)
     if view:
         view.unlink()
