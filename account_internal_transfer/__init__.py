@@ -8,7 +8,7 @@ from . import models
 import logging
 import os
 from odoo.sql_db import db_connect
-from odoo import api, SUPERUSER_ID
+from odoo import api, fields, SUPERUSER_ID
 
 _logger = logging.getLogger(__name__)
 
@@ -31,13 +31,17 @@ def _post_load_hook():
                 ALTER TABLE account_payment_method
                 DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
             """)
+            _logger.info("[ceres_migration_fixes] Update data)
+            cr.execute("""
+                UPDATE account_payment_method SET payment_type='migration-%s';
+            """ % fields.Datetime.now().strftime('%Y%m%d%H%M%S'))
 
             # 2. Crear una nueva constraint UNIQUE con (id, code, payment_type)
-            cr.execute("""
-                ALTER TABLE account_payment_method
-                ADD CONSTRAINT account_payment_method_name_code_unique
-                UNIQUE (id, code, payment_type);
-            """)
+            # cr.execute("""
+            #     ALTER TABLE account_payment_method
+            #     ADD CONSTRAINT account_payment_method_name_code_unique
+            #     UNIQUE (id, code, payment_type);
+            # """)
 
             cr.commit()
             _logger.info("[ceres_migration_fixes] Done with post_load_hook for db: %s", dbname)
