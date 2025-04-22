@@ -43,10 +43,9 @@ def _post_load_hook():
     FROM account_payment_method
 )
 UPDATE account_payment_method apm
-SET code = CONCAT(code, '-', LPAD(rn::text, 3, '0'))
+SET code = CONCAT(r.code, '-', LPAD(r.rn::text, 3, '0'))
 FROM ranked r
 WHERE apm.id = r.id;
-
             """)
 
             cr.commit()
