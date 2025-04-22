@@ -31,7 +31,7 @@ def _post_load_hook():
                 ALTER TABLE account_payment_method
                 DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
             """)
-            _logger.info("[ceres_migration_fixes] Update data)
+            _logger.info("[ceres_migration_fixes] Update data")
             cr.execute("""
                 UPDATE account_payment_method SET payment_type='migration-%s';
             """ % fields.Datetime.now().strftime('%Y%m%d%H%M%S'))
