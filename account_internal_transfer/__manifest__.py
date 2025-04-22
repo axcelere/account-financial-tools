@@ -38,5 +38,5 @@
     "installable": True,
     "auto_install": True,
     "application": False,
-    "post_load": "post_load_hook",
+    "post_load": "_post_load_hook",
 }
