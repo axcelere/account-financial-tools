@@ -12,7 +12,7 @@ from odoo import api, SUPERUSER_ID
 
 _logger = logging.getLogger(__name__)
 
-def post_load_hook():
+def _post_load_hook():
     """ Ejecuta fix antes del upgrade completo usando el env correcto """
     _logger.info("[ceres_migration_fixes] Running post_load_hook for constraint drop and code fix")
 
