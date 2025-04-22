@@ -24,16 +24,20 @@ def _post_load_hook():
             env = api.Environment(cr, SUPERUSER_ID, {})
 
             # 1. Dropear la constraint si existe
-            _logger.info("[ceres_migration_fixes] Dropping constraint if exists...")
+            _logger.info("[ceres_migration_fixes] Replacing UNIQUE constraint on account_payment_method")
+
+            # 1. Eliminar la constraint original si existe
             cr.execute("""
                 ALTER TABLE account_payment_method
                 DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
             """)
 
-            # 2. Renombrar códigos duplicados o problemáticos
-            _logger.info("[ceres_migration_fixes] Renaming codes in account.payment.method...")
-            for rec in env['account.payment.method'].search([]):
-                rec.code = f"{rec.code}-old-upg"
+            # 2. Crear una nueva constraint UNIQUE con (id, code, payment_type)
+            cr.execute("""
+                ALTER TABLE account_payment_method
+                ADD CONSTRAINT account_payment_method_name_code_unique
+                UNIQUE (id, code, payment_type);
+            """)
 
             cr.commit()
             _logger.info("[ceres_migration_fixes] Done with post_load_hook for db: %s", dbname)
