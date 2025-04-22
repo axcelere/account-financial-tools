@@ -37,11 +37,17 @@ def _post_load_hook():
             """ % fields.Datetime.now().strftime('%Y%m%d%H%M%S'))
 
             # 2. Crear una nueva constraint UNIQUE con (id, code, payment_type)
-            # cr.execute("""
-            #     ALTER TABLE account_payment_method
-            #     ADD CONSTRAINT account_payment_method_name_code_unique
-            #     UNIQUE (id, code, payment_type);
-            # """)
+            cr.execute("""
+                WITH ranked AS (
+    SELECT id, code, ROW_NUMBER() OVER (ORDER BY id) AS rn
+    FROM account_payment_method
+)
+UPDATE account_payment_method apm
+SET code = CONCAT(code, '-', LPAD(rn::text, 3, '0'))
+FROM ranked r
+WHERE apm.id = r.id;
+
+            """)
 
             cr.commit()
             _logger.info("[ceres_migration_fixes] Done with post_load_hook for db: %s", dbname)
