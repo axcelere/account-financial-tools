@@ -8,35 +8,32 @@ from . import models
 import logging
 import os
 from odoo.sql_db import db_connect
-from odoo.api import Environment, SUPERUSER_ID
+from odoo import api, SUPERUSER_ID
 
 _logger = logging.getLogger(__name__)
 
-def _post_load_hook():
-    """ Ejecuta fix antes del upgrade completo """
-    dbname = os.environ.get("DB_NAME")
-    if not dbname:
-        _logger.warning("[ceres_migration_fixes] DB_NAME not found in environment")
-        return
+def post_load_hook():
+    """ Ejecuta fix antes del upgrade completo usando el env correcto """
+    _logger.info("[ceres_migration_fixes] Running post_load_hook for constraint drop and code fix")
 
-    try:
-        with db_connect(dbname).cursor() as cr:
-            _logger.info("[ceres_migration_fixes] Dropping constraint account_payment_method_name_code_unique if exists...")
+    # Odoo garantiza que en este punto el Registry ya está inicializado
+    from odoo.modules.registry import Registry
+    for dbname in Registry.registries:
+        registry = Registry.registries[dbname]
+        with registry.cursor() as cr:
+            env = api.Environment(cr, SUPERUSER_ID, {})
+
+            # 1. Dropear la constraint si existe
+            _logger.info("[ceres_migration_fixes] Dropping constraint if exists...")
             cr.execute("""
                 ALTER TABLE account_payment_method
                 DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
             """)
-            cr.commit()
 
-        # Reabrimos la conexión con el mismo cursor para acceder a Odoo ORM
-        with db_connect(dbname).cursor() as cr:
-            env = Environment(cr, SUPERUSER_ID, {})
-            _logger.info("[ceres_migration_fixes] Renaming duplicated codes in account.payment.method...")
+            # 2. Renombrar códigos duplicados o problemáticos
+            _logger.info("[ceres_migration_fixes] Renaming codes in account.payment.method...")
             for rec in env['account.payment.method'].search([]):
                 rec.code = f"{rec.code}-old-upg"
+
             cr.commit()
-
-        _logger.info("[ceres_migration_fixes] Constraint dropped and codes renamed.")
-
-    except Exception as e:
-        _logger.exception("[ceres_migration_fixes] Error during post_load_hook: %s", e)
+            _logger.info("[ceres_migration_fixes] Done with post_load_hook for db: %s", dbname)
