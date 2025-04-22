@@ -3,15 +3,53 @@
 # directory
 ##############################################################################
 import logging
+import os
+from odoo.sql_db import db_connect
+from odoo.api import Environment, SUPERUSER_ID
+
 _logger = logging.getLogger(__name__)
 
 from . import models
 
-def _post_load_hook(env):
-    _logger.info('L10n Latam Check Adhoc Executing pre init method')
-    env.cr.execute('''
-        ALTER TABLE account_payment_method
-        DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
-    ''')
-    for rec in env['account.payment.method'].search([]):
-        rec.write({'code': '%s-%s' % (rec.code, 'old-upg')})
+ChatGPT Plus
+Perfecto, lo incorporamos al post_load_hook, pero como ahí no tenés acceso directo al env (porque estamos fuera del contexto normal de un migrate o model), tenemos que crear un Environment manualmente, como hacés en migraciones.
+
+✨ Versión final del hooks.py con ORM + SQL:
+python
+Copiar
+Editar
+import logging
+import os
+from odoo.sql_db import db_connect
+from odoo.api import Environment, SUPERUSER_ID
+
+_logger = logging.getLogger(__name__)
+
+def _post_load_hook():
+    """ Ejecuta fix antes del upgrade completo """
+    dbname = os.environ.get("DB_NAME")
+    if not dbname:
+        _logger.warning("[ceres_migration_fixes] DB_NAME not found in environment")
+        return
+
+    try:
+        with db_connect(dbname).cursor() as cr:
+            _logger.info("[ceres_migration_fixes] Dropping constraint account_payment_method_name_code_unique if exists...")
+            cr.execute("""
+                ALTER TABLE account_payment_method
+                DROP CONSTRAINT IF EXISTS account_payment_method_name_code_unique;
+            """)
+            cr.commit()
+
+        # Reabrimos la conexión con el mismo cursor para acceder a Odoo ORM
+        with db_connect(dbname).cursor() as cr:
+            env = Environment(cr, SUPERUSER_ID, {})
+            _logger.info("[ceres_migration_fixes] Renaming duplicated codes in account.payment.method...")
+            for rec in env['account.payment.method'].search([]):
+                rec.code = f"{rec.code}-old-upg"
+            cr.commit()
+
+        _logger.info("[ceres_migration_fixes] Constraint dropped and codes renamed.")
+
+    except Exception as e:
+        _logger.exception("[ceres_migration_fixes] Error during post_load_hook: %s", e)
