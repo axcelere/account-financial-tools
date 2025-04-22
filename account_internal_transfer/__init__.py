@@ -2,22 +2,9 @@
 # For copyright and license notices, see __manifest__.py file in module root
 # directory
 ##############################################################################
-import logging
-import os
-from odoo.sql_db import db_connect
-from odoo.api import Environment, SUPERUSER_ID
-
-_logger = logging.getLogger(__name__)
 
 from . import models
 
-ChatGPT Plus
-Perfecto, lo incorporamos al post_load_hook, pero como ahí no tenés acceso directo al env (porque estamos fuera del contexto normal de un migrate o model), tenemos que crear un Environment manualmente, como hacés en migraciones.
-
-✨ Versión final del hooks.py con ORM + SQL:
-python
-Copiar
-Editar
 import logging
 import os
 from odoo.sql_db import db_connect
