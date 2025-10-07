@@ -34,6 +34,7 @@ class ResPartner(models.Model):
             balance=None,
             amount_currency=None,
             amount_residual_currency=None,
+            balance_currency=None,
             currency_name=None,
             move_line=None,
         ):
@@ -49,6 +50,7 @@ class ResPartner(models.Model):
                 "balance": balance,
                 "amount_currency": amount_currency,
                 "amount_residual_currency": amount_residual_currency,
+                "balance_currency": balance_currency,
                 "currency_name": currency_name,
                 "move_line": move_line,
             }
@@ -64,6 +66,7 @@ class ResPartner(models.Model):
         secondary_currency = self._context.get("secondary_currency")
         only_currency_lines = not self._context.get("company_currency") and secondary_currency
         balance_in_currency = 0.0
+        balance_currency = 0.0
         balance_in_currency_name = ""
         domain = []
 
@@ -104,21 +107,11 @@ class ResPartner(models.Model):
                 ._read_group(initial_domain, groupby=["partner_id"], aggregates=["balance:sum"])
             )
             balance = inicial_lines[0][1] if inicial_lines else 0.0
+            balance_in_currency = 0.0
+            balance_in_currency_name = ""
             if len(company_currency_ids) == 1:
-                inicial_lines_currency = (
-                    self.env["account.move.line"]
-                    .sudo()
-                    ._read_group(
-                        initial_domain + [("currency_id", "not in", company_currency_ids.ids)],
-                        groupby=["partner_id"],
-                        aggregates=["amount_currency:sum", "currency_id:array_agg"],
-                    )
-                )
-                balance_in_currency = inicial_lines_currency[0]["amount_currency"] if inicial_lines_currency else 0.0
-                balance_in_currency_name = (
-                    self.env["res.currency"].browse(inicial_lines_currency[0]["currency_id"][0]).display_name
-                    if inicial_lines_currency and inicial_lines_currency[0]["currency_id"][0]
-                    else ""
+                balance_in_currency, balance_in_currency_name = self._get_currency_balance(
+                    initial_domain, company_currency_ids
                 )
 
             res = [
@@ -136,7 +129,6 @@ class ResPartner(models.Model):
 
         if to_date:
             domain.append(("date", "<=", to_date))
-        final_line = []
 
         records = (
             self.env["account.move.line"]
@@ -174,6 +166,12 @@ class ResPartner(models.Model):
             amount_currency = record.amount_currency
             amount_residual_currency = record.amount_residual_currency
             show_currency = record.currency_id != record.company_id.currency_id
+
+            if historical_full:
+                balance_currency += record.amount_currency if show_currency else 0.0
+            else:
+                balance_currency += record.amount_residual_currency if show_currency else 0.0
+
             if record.payment_id:
                 name += " - " + record.journal_id.name
 
@@ -189,23 +187,40 @@ class ResPartner(models.Model):
                     balance=balance,
                     amount_currency=amount_currency if show_currency else False,
                     amount_residual_currency=amount_residual_currency if show_currency else False,
+                    balance_currency=balance_currency if show_currency else False,
                     currency_name=currency.name if show_currency else False,
                     # move_line=record.move_line_id,
                 )
             )
 
-        record_currencys = records.filtered(lambda x: x.currency_id != x.company_id.currency_id)
-        if len(record_currencys.mapped("currency_id")) == 1:
-            total_currency = sum(record_currencys.mapped("amount_currency")) + balance_in_currency
-            total_residual_currency = sum(record_currencys.mapped("amount_residual_currency"))
-            final_line += [
-                get_line_vals(
-                    name=_("Total"),
-                    amount_currency=total_currency,
-                    amount_residual_currency=total_residual_currency,
-                    currency_name=record_currencys.mapped("currency_id").name,
-                )
-            ]
-
-        res += final_line
         return res
+
+    def _get_currency_balance(self, initial_domain, company_currency_ids):
+        inicial_lines_currency = (
+            self.env["account.move.line"]
+            .sudo()
+            ._read_group(
+                initial_domain + [("currency_id", "not in", company_currency_ids.ids)],
+                groupby=["partner_id"],
+                aggregates=["amount_currency:sum", "currency_id:array_agg"],
+            )
+        )
+
+        balance_in_currency = 0.0
+        balance_in_currency_name = ""
+
+        # Process the result if there are lines
+        if inicial_lines_currency:
+            first = inicial_lines_currency[0]
+            if isinstance(first, dict):
+                balance_in_currency = first.get("amount_currency", 0.0)
+                balance_in_currency_name = (
+                    self.env["res.currency"].browse(first.get("currency_id")[0]).display_name
+                    if first.get("currency_id")
+                    else ""
+                )
+            elif isinstance(first, tuple):
+                balance_in_currency = first[1]
+                balance_in_currency_name = self.env["res.currency"].browse(first[2][0]).display_name if first[2] else ""
+
+        return balance_in_currency, balance_in_currency_name

@@ -3,16 +3,16 @@
 # 	* account_internal_transfer
 # 
 # Translators:
-# Juan José Scarafía <scarafia.juanjose@gmail.com>, 2024
 # Gonzalo, 2025
+# Juan José Scarafía <scarafia.juanjose@gmail.com>, 2025
 # 
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 18.0+e\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-03-22 18:18+0000\n"
+"POT-Creation-Date: 2025-08-26 13:48+0000\n"
 "PO-Revision-Date: 2024-11-08 12:53+0000\n"
-"Last-Translator: Gonzalo, 2025\n"
+"Last-Translator: Juan José Scarafía <scarafia.juanjose@gmail.com>, 2025\n"
 "Language-Team: Spanish (https://app.transifex.com/adhoc/teams/46451/es/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -77,6 +77,11 @@ msgid "A second payment has been created:"
 msgstr "Se ha creado un segundo pago:"
 
 #. module: account_internal_transfer
+#: model:ir.model.fields,field_description:account_internal_transfer.field_account_payment__available_partner_bank_ids
+msgid "Available Partner Bank"
+msgstr "Banco del contacto disponible"
+
+#. module: account_internal_transfer
 #: model:ir.model,name:account_internal_transfer.model_account_bank_statement_line
 msgid "Bank Statement Line"
 msgstr "Línea de extracto bancario"
@@ -119,6 +124,11 @@ msgstr "Transferencia Interna"
 #: model_terms:ir.ui.view,arch_db:account_internal_transfer.view_account_payment_search
 msgid "Internal Transfers"
 msgstr "Transferencias Internas"
+
+#. module: account_internal_transfer
+#: model:ir.model.fields,field_description:account_internal_transfer.field_account_payment__main_company_id
+msgid "Main Company"
+msgstr ""
 
 #. module: account_internal_transfer
 #: model:ir.model,name:account_internal_transfer.model_account_payment
