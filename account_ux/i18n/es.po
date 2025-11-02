@@ -5,15 +5,15 @@
 # Translators:
 # feg, 2024
 # Gonzalo, 2024
-# Juan José Scarafía <scarafia.juanjose@gmail.com>, 2025
+# Juan José Scarafía <scarafia.juanjose@gmail.com>, 2024
 # 
 msgid ""
 msgstr ""
 "Project-Id-Version: Odoo Server 17.0+e\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-01-21 17:19+0000\n"
+"POT-Creation-Date: 2025-09-01 06:07+0000\n"
 "PO-Revision-Date: 2023-11-23 13:23+0000\n"
-"Last-Translator: Juan José Scarafía <scarafia.juanjose@gmail.com>, 2025\n"
+"Last-Translator: Juan José Scarafía <scarafia.juanjose@gmail.com>, 2024\n"
 "Language-Team: Spanish (https://app.transifex.com/adhoc/teams/46451/es/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -31,6 +31,22 @@ msgid ""
 msgstr ""
 "\n"
 "Fecha\t\t\tFecha de Factura\t\tFactura\n"
+
+#. module: account_ux
+#. odoo-python
+#: code:addons/account_ux/models/account_move.py:0
+#, python-format
+msgid ""
+"<b>Error sending the invoice</b>: partner %s does not have an email address "
+"defined."
+msgstr ""
+
+#. module: account_ux
+#: model_terms:ir.ui.view,arch_db:account_ux.view_account_journal_form
+msgid ""
+"<i>Please note that when this box is selected, you must ensure that the \n"
+"                            payments follow a different sequence format.</i>"
+msgstr ""
 
 #. module: account_ux
 #: model:ir.model,name:account_ux.model_account_account
@@ -51,23 +67,6 @@ msgstr "Grupo de cuenta"
 #: model_terms:ir.ui.view,arch_db:account_ux.view_move_form
 msgid "Add an internal note..."
 msgstr "Agregar una nota interna"
-
-#. module: account_ux
-#: model:ir.model.fields,field_description:account_ux.field_account_account__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_bank_statement_line__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_change_currency__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_chart_template__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_group__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_invoice_report__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_journal__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_move__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_move_line__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_account_payment__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_res_company__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_res_config_settings__algolia_search
-#: model:ir.model.fields,field_description:account_ux.field_res_currency_rate__algolia_search
-msgid "Algolia Search"
-msgstr "Busqueda Avanzada"
 
 #. module: account_ux
 #: model_terms:ir.ui.view,arch_db:account_ux.view_account_invoice_tree
@@ -625,6 +624,14 @@ msgstr ""
 "No puede crear una cotización sin compañía ya que ya tiene cotizaciones "
 "antes de %s con la compañía definida. La cotización que desee crear no "
 "tendrá ningún efecto, no se tendrá en cuenta."
+
+#. module: account_ux
+#. odoo-python
+#: code:addons/account_ux/models/account_payment.py:0
+#, python-format
+msgid ""
+"You cannot delete a posted payment, you should set it back to draft first."
+msgstr ""
 
 #. module: account_ux
 #: model_terms:ir.ui.view,arch_db:account_ux.view_account_change_currency

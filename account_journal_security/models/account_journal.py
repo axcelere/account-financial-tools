@@ -4,7 +4,7 @@
 ##############################################################################
 from odoo import fields, models, api, SUPERUSER_ID, _
 from odoo.exceptions import ValidationError
-
+from odoo import tools
 
 class AccountJournal(models.Model):
     _inherit = 'account.journal'
@@ -27,7 +27,7 @@ class AccountJournal(models.Model):
         'journal_security_journal_modification_users',
         'journal_id',
         'user_id',
-        string='Modifications restricted to',
+        string='Modifications allowed to',
         help='If choose some users, then only this users will be allow to '
         ' create, write or delete accounting data related of this journal. '
         'Information will still be visible for other users.',
@@ -106,10 +106,20 @@ class AccountJournal(models.Model):
         cualquier lugar que se use un campo related a algo del diario
         """
         user = self.env.user
-        if not self.env.is_superuser():
+        # Agregamos el with_user ya que por alguna razon llega con sudo y nos da un falso positivo indicando 
+        # que el usuario es super usuario. De esta forma nos aseguramos verdaderamente si lo es.
+        if not self.with_user(user.id).env.is_superuser():
             domain += [
                 '|', ('modification_user_ids', '=', False),
-                ('id', 'in', user.modification_journal_ids.ids)]
+                ('id', 'not in', user.journal_ids.ids)]
+            journal_ids = (user.journal_ids.ids + user.modification_journal_ids.ids)
+            if limit == 1 and journal_ids:
+                # Agregamos el domain de los journals donde el usuario tiene permisos
+                domain += [
+                    '|',
+                    ('user_ids', '=', False),
+                    ('id', 'in', journal_ids),
+                ]
         return super()._search(domain, offset, limit, order, access_rights_uid=access_rights_uid)
 
     @api.onchange('journal_restriction')

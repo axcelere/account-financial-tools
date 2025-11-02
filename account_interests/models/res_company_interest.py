@@ -3,7 +3,7 @@
 # directory
 ##############################################################################
 from odoo import models, fields, api, _
-from odoo.tools.safe_eval import safe_eval
+from odoo.tools import safe_eval
 from dateutil.relativedelta import relativedelta
 from odoo.exceptions import UserError
 import logging
@@ -43,6 +43,13 @@ class ResCompanyInterest(models.Model):
         required=True,
         digits=(7, 4)
     )
+    past_due_rate = fields.Float(
+        'Interest for Previous Period',
+        digits=(7, 4),
+        default=False,
+        help="If set, this rate will be used for overdue debts from previous periods. "
+            "If not set, the standard interest rate (rate) for the current period will be applied."
+    )
     automatic_validation = fields.Boolean(
         'Automatic Validation?',
         help='Automatic Invoice Validation?',
@@ -73,28 +80,60 @@ class ResCompanyInterest(models.Model):
         help="Extra filters that will be added to the standard search"
     )
     has_domain = fields.Boolean(compute="_compute_has_domain")
+    bypass_company_interest = fields.Boolean(
+        'Bypass Company Interest',
+        help='Bypass the company interest calculation',
+        default=False,
+    )
 
     late_payment_interest = fields.Boolean('Late payment interest', default=False, help="The interest calculation takes into account all late payments from the previous period. To obtain the daily rate, the interest is divided by the period. These days are considered depending on the type of period: 360 for annual, 30 for monthly and 7 for weekly.")
 
     @api.model
-    def _cron_recurring_interests_invoices(self):
+    def _cron_recurring_interests_invoices(self, batch_size=1):
+        # batch_size is the batch of companies to process
         _logger.info('Running Interest Invoices Cron Job')
         current_date = fields.Date.today()
-        companies_with_errors = []
 
-        for rec in self.search([('next_date', '<=', current_date)]):
+        parameter_name = 'account_interest.last_updated_record_id'
+        last_updated_param = self.env['ir.config_parameter'].sudo().search([('key', '=', parameter_name)], limit=1)
+        if not last_updated_param:
+            last_updated_param = self.env['ir.config_parameter'].sudo().create({'key': parameter_name, 'value': '0'})
+        # Obtiene los registros ordenados por id
+        domain = [('id', '>', int(last_updated_param.value)), ('next_date', '<=', current_date), ('bypass_company_interest', '=', False)]
+        records = self.with_context(prefetch_fields=False).search(domain, order='id asc', limit=batch_size + 1)
+        
+        #Ya de esta forma se esta recorriendo por compañia
+        for rec in records[:batch_size]:
             try:
                 rec.create_interest_invoices()
                 rec.env.cr.commit()
             except Exception as e:
-                _logger.error('Error creating interest invoices for company: %s, %s', rec.company_id.name, str(e))
-                companies_with_errors.append(rec.company_id.name)
+                _logger.error('Error creating interest invoices for company: %s, Error: %s', rec.company_id.name, str(e))
                 rec.env.cr.rollback()
+                rec.company_id.message_post(body=_(
+                    "We couldn't run interest invoices cron job in the company: %s,  Error: %s" % (rec.company_id.name, str(e))
+                ))
+                rec.bypass_company_interest = True
+                rec.env.cr.commit()
 
-        if companies_with_errors:
-            company_names = ', '.join(companies_with_errors)
-            error_message = _("We couldn't run interest invoices cron job in the following companies: %s.") % company_names
-            raise UserError(error_message)
+        if len(records) >= batch_size:
+            last_updated_id = records[batch_size-1].id
+        else:
+            last_updated_id = 0
+            avoid_companies = self.with_context(prefetch_fields=False).search([('next_date', '<=', current_date),('bypass_company_interest','=',True)])
+            if avoid_companies:
+                company_names = ', '.join(avoid_companies.mapped('company_id.name'))
+                error_message = _("We couldn't run interest invoices cron job in the following companies: %s.") % company_names
+                avoid_companies.bypass_company_interest = False
+                self.env.cr.commit()
+                raise UserError(error_message)
+
+        self.env['ir.config_parameter'].sudo().set_param(parameter_name, str(last_updated_id))
+        self.env.cr.commit()
+
+        if last_updated_id:
+            cron = self.env['ir.cron'].browse(self.env.context.get('job_id')) or self.env.ref('account_interests.cron_recurring_interests_invoices')
+            cron._trigger()
 
     def _calculate_date_deltas(self, rule_type, interval):
         """
@@ -142,7 +181,7 @@ class ResCompanyInterest(models.Model):
             ('parent_state', '=', 'posted'),
         ]
         if self.domain:
-            move_line_domain += safe_eval(self.domain)
+            move_line_domain += safe_eval.safe_eval(self.domain, self._get_eval_context())
         return move_line_domain
 
     def _update_deuda(self, deuda, partner, key, value):
@@ -154,6 +193,11 @@ class ResCompanyInterest(models.Model):
         if partner not in deuda:
             deuda[partner] = {}
         deuda[partner][key] = deuda[partner].get(key, 0) + value
+
+    def _calculate_rate(self):
+        if self.past_due_rate and self.env.context.get('debt_past_period'):
+            return self.past_due_rate
+        return self.rate
 
     def _calculate_debts(self, from_date, to_date, groupby=['partner_id']):
         """
@@ -176,7 +220,7 @@ class ResCompanyInterest(models.Model):
             aggregates=['amount_residual:sum'],
         )
         for x in previous_grouped_lines:
-            self._update_deuda(deuda, x[0], 'Deuda periodos anteriores', x[1] * self.rate * self.interval)
+            self._update_deuda(deuda, x[0], 'Deuda periodos anteriores', x[1] * self.with_context(debt_past_period=True)._calculate_rate() * self.interval)
 
         # Intereses por el último período
         last_period_lines = self.env['account.move.line'].search(
@@ -184,7 +228,7 @@ class ResCompanyInterest(models.Model):
         )
         for partner, amls in last_period_lines.grouped('partner_id').items():
             interest = sum(
-                move.amount_residual * ((to_date - move.invoice_date_due).days) * (self.rate / interest_rate[self.rule_type])
+                move.amount_residual * ((to_date - move.invoice_date_due).days) * (self._calculate_rate()/ interest_rate[self.rule_type])
                 for move, lines in amls.grouped('move_id').items()
             )
             self._update_deuda(deuda, partner, 'Deuda último periodo', interest)
@@ -202,17 +246,33 @@ class ResCompanyInterest(models.Model):
                 ('credit_move_id.date', '<', to_date)]
             
             if self.domain:
-                partial_domain.append(('debit_move_id', 'any', safe_eval(self.domain)))
+                partial_domain.append(('debit_move_id', 'any', safe_eval.safe_eval(self.domain, self._get_eval_context())))
             
             partials = self.env['account.partial.reconcile'].search(partial_domain).filtered(lambda x: x.credit_move_id.date > x.debit_move_id.date_maturity).grouped('debit_move_id')
             for move_line, parts in partials.items():
-                due_date = max(from_date, parts.debit_move_id.date_maturity)
+                for part in parts:
+                    due_date = max(from_date, part.debit_move_id.date_maturity)
 
-                days = (parts.credit_move_id.date - due_date).days
-                interest =  parts.amount * days * (self.rate / interest_rate[self.rule_type])
-            self._update_deuda(deuda, move_line.partner_id, 'Deuda pagos vencidos', interest)
+                    days = (part.credit_move_id.date - due_date).days
+                    interest = part.amount * days * (self._calculate_rate() / interest_rate[self.rule_type])
+                    self._update_deuda(deuda, move_line.partner_id, 'Deuda pagos vencidos', interest)
 
         return deuda
+
+    def _search_last_journal_for_partner(self, partner, debt):
+        journal = self.env['account.move'].with_context(
+            internal_type='debit_note', 
+            default_move_type='out_invoice'
+        ).new({
+            'partner_id': partner.id, 
+            'move_type': 'out_invoice',
+            'company_id':self.company_id.id
+        }).journal_id
+        
+        if self.receivable_account_ids != journal.default_account_id:
+            journal = self.env['account.journal'].search([('default_account_id','in',self.receivable_account_ids.ids)], limit=1) or journal
+            
+        return journal
 
     def create_invoices(self, from_date, to_date):
         """
@@ -231,31 +291,34 @@ class ResCompanyInterest(models.Model):
         # Calcular deudas e intereses
         deuda = self._calculate_debts(from_date, to_date)
 
-        journal = self.env['account.journal'].search([
-            ('type', '=', 'sale'),
-            ('company_id', '=', self.company_id.id)], limit=1)
-
         total_items = len(deuda)
+        batch_size = 100
+        batch_start = 0
         _logger.info('%s interest invoices will be generated', total_items)
 
-        # Crear facturas
-        for idx, partner in enumerate(deuda):
-            move_vals = self._prepare_interest_invoice(partner, deuda[partner], to_date, journal)
-            if not move_vals:
-                continue
+        while batch_start < total_items:
+            items = list(deuda.items())
+            batch = dict(items[batch_start:batch_start + batch_size])
+            _logger.info('Processing batch %s to %s of %s', batch_start + 1, batch_start + len(batch), total_items)
+            # Crear facturas
+            for idx, partner in enumerate(batch, start=batch_start):
+                journal = self._search_last_journal_for_partner(partner,deuda[partner])
+                
+                move_vals = self._prepare_interest_invoice(partner, deuda[partner], to_date, journal)
+                if not move_vals:
+                    continue
 
-            _logger.info('Creating Interest Invoice (%s of %s) for partner ID: %s', idx + 1, total_items, partner.id)
+                _logger.info('Creating Interest Invoice (%s of %s) for partner ID: %s', idx + 1, total_items, partner.id)
 
-            move = self.env['account.move'].create(move_vals)
-            if self.automatic_validation:
-                try:
-                    move.action_post()
-                except Exception as e:
-                    _logger.error(
-                        "Something went wrong creating "
-                        "interests invoice: {}".format(e))
-
-
+                move = self.env['account.move'].create(move_vals)
+                if self.automatic_validation:
+                    try:
+                        move.action_post()
+                    except Exception as e:
+                        _logger.error(
+                            "Something went wrong creating "
+                            "interests invoice: {}".format(e))
+            batch_start += batch_size
 
 
     def _prepare_info(self, to_date):
@@ -266,11 +329,16 @@ class ResCompanyInterest(models.Model):
         lang = self.env['res.lang']._lang_get(lang_code)
         date_format = lang.date_format
         to_date_format = to_date.strftime(date_format)
-
-        res = _(
-            'Deuda Vencida al %s con tasa de interés de %s') % (
-                to_date_format, self.rate)
-
+        if not self.past_due_rate:
+            res = _(
+                'Deuda Vencida al %s con tasa de interés de %s') % (
+                    to_date_format, self.rate)
+        else:
+            res = _(
+                'Deuda Vencida al %s de periodos anteriores con tasa de interés de %s. '
+                'Deuda Vencida al %s del ultimo periodo con tasa de interés de %s',
+                to_date_format, self.past_due_rate, to_date_format, self.rate
+            )
         return res
 
     def _prepare_interest_invoice(self, partner, debt, to_date, journal):
@@ -328,7 +396,21 @@ class ResCompanyInterest(models.Model):
 
         return invoice_vals
 
-    @api.depends('domain')
+    @api.depends("domain")
     def _compute_has_domain(self):
         for rec in self:
-            rec.has_domain = len(safe_eval(rec.domain)) > 0
+            domain = rec.domain or "[]"
+            evaluated_domain = safe_eval.safe_eval(domain, self._get_eval_context())
+            rec.has_domain = len(evaluated_domain) > 0
+
+    def _get_eval_context(self):
+        """Prepare the context used when evaluating python code
+        :returns: dict -- evaluation context given to safe_eval
+        """
+        return {
+            'context_today': safe_eval.datetime.datetime.today,
+            'datetime': safe_eval.datetime,
+            'dateutil': safe_eval.dateutil,
+            'relativedelta': safe_eval.dateutil.relativedelta.relativedelta,
+            'time': safe_eval.time,
+        }
